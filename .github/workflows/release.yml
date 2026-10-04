@@ -1,0 +1,90 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+            ext: ""
+          - os: windows-latest
+            name: windows
+            ext: ".exe"
+          - os: macos-latest
+            name: macos
+            ext: ""
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++-14
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+          curl -sL https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz | tar xz
+          sudo mv premake5 /usr/local/bin/
+
+      - name: Install tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install premake ninja gcc
+          GXX=$(ls /opt/homebrew/bin/g++-* /usr/local/bin/g++-* 2>/dev/null | head -n1)
+          echo "CXX=$GXX" >> "$GITHUB_ENV"
+
+      - name: Install tools (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install ninja premake -y --no-progress
+          echo "CXX=g++" >> "$GITHUB_ENV"
+
+      - name: Generate ninja files
+        run: premake5 ninja
+
+      - name: Build
+        run: |
+          # Premake's gcc toolset invokes plain "g++"; point it at the chosen compiler.
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -sf "$(command -v "$CXX")" "$RUNNER_TEMP/bin/g++" 2>/dev/null || cp "$(command -v "$CXX")" "$RUNNER_TEMP/bin/g++"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          g++ --version
+          ninja -C build Release
+
+      - name: Package
+        run: |
+          mkdir dist
+          cp build/bin/Release/TerminalChess${{ matrix.ext }} dist/TerminalChess-${{ matrix.name }}${{ matrix.ext }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TerminalChess-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          files: dist/*
