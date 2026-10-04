@@ -13,7 +13,8 @@ project "TerminalChess"
     objdir "build/obj/%{cfg.buildcfg}"
 
     files { "src/**.cpp", "include/**.h" }
-    includedirs { "include" }
+    includedirs { "include", "external/asio/include" }
+    defines { "ASIO_STANDALONE" }
 
     filter "configurations:Debug"
         symbols "On"
@@ -22,3 +23,10 @@ project "TerminalChess"
     filter "configurations:Release"
         optimize "On"
         defines { "NDEBUG" }
+
+    filter "system:windows"
+        links { "ws2_32", "mswsock" }
+        defines { "_WIN32_WINNT=0x0A00" }
+
+    filter "system:not windows"
+        links { "pthread" }
